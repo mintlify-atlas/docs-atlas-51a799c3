@@ -1,0 +1,75 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "WideLogger",
+  "projectDescription": "Structured wide event logging for Node.js with context accumulation throughout request lifecycles.",
+  "theme": "aspen",
+  "primaryColor": "#4A90E2",
+  "lightColor": "#67A3E8",
+  "darkColor": "#3A75C2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": ["concepts/context-isolation", "concepts/dot-notation", "concepts/log-routing"]
+          },
+          {
+            "group": "Integration Guides",
+            "pages": ["guides/express", "guides/bun", "guides/fastify", "guides/hono"]
+          },
+          {
+            "group": "Advanced",
+            "pages": ["advanced/error-handling", "advanced/timing", "advanced/aggregations"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": ["api/widelogger", "api/widelog", "api/destroy"]
+          },
+          {
+            "group": "Methods",
+            "pages": ["api/context", "api/set", "api/count", "api/append", "api/max-min", "api/time", "api/error-fields", "api/flush"]
+          },
+          {
+            "group": "Types",
+            "pages": ["api/types"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Context isolation with AsyncLocalStorage",
+    "Accumulate fields throughout request lifecycle",
+    "Single structured log per request",
+    "Dot notation for nested objects",
+    "Built-in timing and aggregation operations",
+    "Error field extraction",
+    "Automatic log level routing",
+    "Pretty-print in development, JSON in production"
+  ],
+  "publicApiSurface": [
+    "widelogger(options)",
+    "widelog.context(fn)",
+    "widelog.set(key, value)",
+    "widelog.count(key, amount?)",
+    "widelog.append(key, value)",
+    "widelog.max(key, value)",
+    "widelog.min(key, value)",
+    "widelog.time.start(key)",
+    "widelog.time.stop(key)",
+    "widelog.errorFields(error, opts?)",
+    "widelog.flush()",
+    "destroy()"
+  ]
+}
