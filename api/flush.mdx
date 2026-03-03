@@ -1,0 +1,191 @@
+---
+title: flush()
+description: Process accumulated operations and emit the log event to the logging transport
+---
+
+The `flush()` method processes all accumulated logging operations in the current context and emits the final log event. This must be called explicitly to output the log.
+
+## Signature
+
+```typescript
+widelog.flush(): void
+```
+
+## Parameters
+
+No parameters.
+
+## Behavior
+
+- Processes all accumulated operations (set, count, append, max, min, time) in the current context
+- Merges operations into a single event object with nested structure based on dotted keys
+- Emits the event to the configured logging transport (pino)
+- Automatically determines log level (error or info) based on event content:
+  - Uses error level if `status_code >= 500` or `outcome === 'error'`
+  - Uses info level otherwise
+- Does nothing if there are no operations to flush
+
+## Examples
+
+### Basic flush
+
+```javascript
+widelog.context(() => {
+  widelog.set('user.id', '123');
+  widelog.set('action', 'login');
+  widelog.flush();  // Emits the log event
+});
+```
+
+### Flush in try-catch-finally
+
+```javascript
+widelog.context(async () => {
+  widelog.set('operation', 'process_payment');
+  
+  try {
+    await processPayment();
+    widelog.set('status', 'success');
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.set('outcome', 'error');
+  } finally {
+    widelog.flush();  // Always flush, even on error
+  }
+});
+```
+
+### Multiple flushes in one context
+
+```javascript
+widelog.context(async () => {
+  // First operation
+  widelog.set('stage', 'validation');
+  widelog.time.start('validation.duration');
+  await validateInput();
+  widelog.time.stop('validation.duration');
+  widelog.flush();  // Emits validation event
+  
+  // Second operation
+  widelog.set('stage', 'processing');
+  widelog.time.start('processing.duration');
+  await processData();
+  widelog.time.stop('processing.duration');
+  widelog.flush();  // Emits processing event
+});
+```
+
+### Express middleware
+
+```javascript
+app.use((req, res, next) => {
+  widelog.context(async () => {
+    widelog.set('http.method', req.method);
+    widelog.set('http.path', req.path);
+    widelog.time.start('http.response_time');
+    
+    res.on('finish', () => {
+      widelog.time.stop('http.response_time');
+      widelog.set('http.status_code', res.statusCode);
+      widelog.flush();  // Flush when response is complete
+    });
+    
+    next();
+  });
+});
+```
+
+### Conditional flushing
+
+```javascript
+widelog.context(async () => {
+  widelog.set('operation', 'background_task');
+  const result = await performTask();
+  
+  // Only log if the task took longer than 1 second
+  if (result.duration > 1000) {
+    widelog.set('duration', result.duration);
+    widelog.set('slow_task', true);
+    widelog.flush();
+  }
+  // If no flush is called, no log is emitted
+});
+```
+
+### Batch processing with periodic flush
+
+```javascript
+widelog.context(async () => {
+  widelog.set('batch.total_items', items.length);
+  
+  for (let i = 0; i < items.length; i++) {
+    await processItem(items[i]);
+    widelog.count('batch.processed');
+    
+    // Flush every 100 items
+    if ((i + 1) % 100 === 0) {
+      widelog.set('batch.checkpoint', i + 1);
+      widelog.flush();
+    }
+  }
+  
+  // Final flush for remaining items
+  widelog.set('batch.status', 'completed');
+  widelog.flush();
+});
+```
+
+## Log level determination
+
+The log level is automatically determined based on the event content:
+
+```javascript
+// This will log at ERROR level
+widelog.context(() => {
+  widelog.set('status_code', 500);
+  widelog.flush();
+});
+
+// This will also log at ERROR level
+widelog.context(() => {
+  widelog.set('outcome', 'error');
+  widelog.flush();
+});
+
+// This will log at INFO level
+widelog.context(() => {
+  widelog.set('status_code', 200);
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "level": "info",
+  "time": "2026-03-03T10:30:45.123Z",
+  "service": "my-api",
+  "service_version": "1.0.0",
+  "environment": "production",
+  "event_name": "api_request",
+  "http": {
+    "method": "POST",
+    "path": "/api/users",
+    "status_code": 201,
+    "response_time": 145.67
+  },
+  "user": {
+    "id": "123"
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Does nothing if called outside a context
+- Does not emit a log if there are no accumulated operations
+- Can be called multiple times within the same context to emit multiple events
+- After flushing, operations can continue to accumulate for the next flush
+- Always emits logs with the configured `defaultEventName` plus any additional fields

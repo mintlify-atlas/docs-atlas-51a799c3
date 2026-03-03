@@ -1,0 +1,164 @@
+---
+title: time.start() and time.stop()
+description: Measure elapsed time between two points and record the duration in the current logging context
+---
+
+The `time.start()` and `time.stop()` methods work together to measure elapsed time. Call `start()` to begin timing, then call `stop()` with the same key to record the duration in milliseconds.
+
+## Signatures
+
+```typescript
+widelog.time.start<K extends string>(key: DottedKey<K>): void
+widelog.time.stop<K extends string>(key: DottedKey<K>): void
+```
+
+## Parameters
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field name using dot notation for nested fields. Must be the same for both `start()` and `stop()` calls. The key cannot be empty, start or end with a dot, or contain empty segments (consecutive dots).
+</ParamField>
+
+## Type definitions
+
+```typescript
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+## How it works
+
+1. Call `widelog.time.start(key)` to mark the start time using `performance.now()`
+2. Perform the operation you want to measure
+3. Call `widelog.time.stop(key)` to mark the end time
+4. The duration in milliseconds is automatically calculated and recorded
+
+## Examples
+
+### Basic timing
+
+```javascript
+widelog.context(async () => {
+  widelog.time.start('operation.duration');
+  
+  await performOperation();
+  
+  widelog.time.stop('operation.duration');
+  widelog.flush();
+});
+```
+
+### Timing multiple operations
+
+```javascript
+widelog.context(async () => {
+  widelog.time.start('database.query_time');
+  await db.query('SELECT * FROM users');
+  widelog.time.stop('database.query_time');
+  
+  widelog.time.start('api.fetch_time');
+  await fetch('https://api.example.com/data');
+  widelog.time.stop('api.fetch_time');
+  
+  widelog.flush();
+});
+```
+
+### Nested timing measurements
+
+```javascript
+widelog.context(async () => {
+  widelog.time.start('request.total_time');
+  
+  widelog.time.start('request.auth_time');
+  await authenticate();
+  widelog.time.stop('request.auth_time');
+  
+  widelog.time.start('request.processing_time');
+  await processRequest();
+  widelog.time.stop('request.processing_time');
+  
+  widelog.time.stop('request.total_time');
+  widelog.flush();
+});
+```
+
+### Timing with error handling
+
+```javascript
+widelog.context(async () => {
+  widelog.time.start('task.duration');
+  
+  try {
+    await executeTask();
+    widelog.set('task.status', 'success');
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.set('task.status', 'failed');
+  } finally {
+    widelog.time.stop('task.duration');
+    widelog.flush();
+  }
+});
+```
+
+### Express middleware timing
+
+```javascript
+app.use((req, res, next) => {
+  widelog.context(async () => {
+    widelog.time.start('http.response_time');
+    
+    res.on('finish', () => {
+      widelog.time.stop('http.response_time');
+      widelog.set('http.status_code', res.statusCode);
+      widelog.flush();
+    });
+    
+    next();
+  });
+});
+```
+
+### Timing parallel operations
+
+```javascript
+widelog.context(async () => {
+  const promises = items.map(async (item, index) => {
+    const timerKey = `item.${index}.duration`;
+    widelog.time.start(timerKey);
+    await processItem(item);
+    widelog.time.stop(timerKey);
+  });
+  
+  await Promise.all(promises);
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "event_name": "api_request",
+  "operation": {
+    "duration": 245.67
+  },
+  "database": {
+    "query_time": 123.45
+  },
+  "request": {
+    "total_time": 456.78,
+    "auth_time": 89.12,
+    "processing_time": 345.67
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- Uses `performance.now()` for high-resolution timing
+- Duration is recorded in milliseconds with decimal precision
+- The same key must be used for both `start()` and `stop()` calls
+- Multiple timers can run concurrently with different keys
+- Use dot notation to create nested timing fields

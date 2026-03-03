@@ -1,0 +1,96 @@
+---
+title: set()
+description: Set a field to a specific value in the current logging context
+---
+
+The `set()` method assigns a value to a field in the current logging context. If the field already exists, it will be overwritten with the new value.
+
+## Signature
+
+```typescript
+widelog.set<K extends string>(key: DottedKey<K>, value: FieldValue): void
+```
+
+## Parameters
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field name using dot notation for nested fields. The key cannot be empty, start or end with a dot, or contain empty segments (consecutive dots).
+</ParamField>
+
+<ParamField path="value" type="FieldValue" required>
+  The value to set. Must be a string, number, or boolean.
+</ParamField>
+
+## Type definitions
+
+```typescript
+type FieldValue = string | number | boolean;
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+## Examples
+
+### Basic usage
+
+```javascript
+widelog.context(() => {
+  widelog.set('user.id', '12345');
+  widelog.set('user.email', 'user@example.com');
+  widelog.set('request.method', 'POST');
+  widelog.flush();
+});
+```
+
+### Different value types
+
+```javascript
+widelog.context(() => {
+  widelog.set('status', 'success');        // string
+  widelog.set('status_code', 200);         // number
+  widelog.set('is_authenticated', true);   // boolean
+  widelog.flush();
+});
+```
+
+### Nested fields
+
+```javascript
+widelog.context(() => {
+  widelog.set('response.body.size', 1024);
+  widelog.set('response.headers.content_type', 'application/json');
+  widelog.flush();
+});
+```
+
+### Overwriting values
+
+```javascript
+widelog.context(() => {
+  widelog.set('status', 'pending');
+  // ... some processing ...
+  widelog.set('status', 'completed');  // Overwrites previous value
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "event_name": "api_request",
+  "user": {
+    "id": "12345",
+    "email": "user@example.com"
+  },
+  "request": {
+    "method": "POST"
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- Use dot notation to create nested object structures
+- The last `set()` call for a given key wins

@@ -1,0 +1,142 @@
+---
+title: max() and min()
+description: Track the maximum or minimum numeric value for a field in the current logging context
+---
+
+The `max()` and `min()` methods track the maximum or minimum value for a numeric field. Multiple calls with the same key will retain only the highest (for `max()`) or lowest (for `min()`) value.
+
+## Signatures
+
+```typescript
+widelog.max<K extends string>(key: DottedKey<K>, value: number): void
+widelog.min<K extends string>(key: DottedKey<K>, value: number): void
+```
+
+## Parameters
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field name using dot notation for nested fields. The key cannot be empty, start or end with a dot, or contain empty segments (consecutive dots).
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  The numeric value to compare against the current maximum or minimum.
+</ParamField>
+
+## Type definitions
+
+```typescript
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+## Examples
+
+### Tracking maximum value
+
+```javascript
+widelog.context(() => {
+  widelog.max('response.size', 1024);
+  widelog.max('response.size', 2048);
+  widelog.max('response.size', 512);
+  // Final value will be 2048
+  widelog.flush();
+});
+```
+
+### Tracking minimum value
+
+```javascript
+widelog.context(() => {
+  widelog.min('query.latency', 150);
+  widelog.min('query.latency', 75);
+  widelog.min('query.latency', 200);
+  // Final value will be 75
+  widelog.flush();
+});
+```
+
+### Performance monitoring
+
+```javascript
+widelog.context(async () => {
+  const tasks = items.map(async (item) => {
+    const start = performance.now();
+    await processItem(item);
+    const duration = performance.now() - start;
+    
+    widelog.max('processing.max_duration', duration);
+    widelog.min('processing.min_duration', duration);
+  });
+  
+  await Promise.all(tasks);
+  widelog.flush();
+});
+```
+
+### Resource usage tracking
+
+```javascript
+widelog.context(() => {
+  setInterval(() => {
+    const memUsage = process.memoryUsage().heapUsed;
+    widelog.max('memory.peak_usage', memUsage);
+  }, 1000);
+  
+  // After some time...
+  widelog.flush();
+});
+```
+
+### API response time analysis
+
+```javascript
+widelog.context(async () => {
+  for (const endpoint of endpoints) {
+    const start = Date.now();
+    await fetch(endpoint);
+    const responseTime = Date.now() - start;
+    
+    widelog.max('api.slowest_response', responseTime);
+    widelog.min('api.fastest_response', responseTime);
+  }
+  
+  widelog.flush();
+});
+```
+
+### Nested fields
+
+```javascript
+widelog.context(() => {
+  widelog.max('database.connection_pool.peak_size', 25);
+  widelog.min('database.query.min_rows', 10);
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "event_name": "batch_process",
+  "response": {
+    "size": 2048
+  },
+  "query": {
+    "latency": 75
+  },
+  "processing": {
+    "max_duration": 523.45,
+    "min_duration": 102.34
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- `max()` retains the highest value across multiple calls
+- `min()` retains the lowest value across multiple calls
+- Both methods only work with numeric values
+- Use dot notation to create nested numeric fields
+- Useful for tracking performance metrics, resource usage, and statistical data

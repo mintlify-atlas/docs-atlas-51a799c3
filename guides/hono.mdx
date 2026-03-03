@@ -1,0 +1,237 @@
+---
+title: Hono integration
+description: Integrate WideLogger with Hono for lightweight, edge-ready structured logging
+---
+
+This guide shows you how to integrate WideLogger with Hono, a lightweight web framework that works across Node.js, Bun, Deno, and edge runtimes.
+
+## Prerequisites
+
+Install WideLogger and Hono:
+
+```bash
+bun add widelogger hono
+# or
+npm install widelogger hono
+```
+
+## Integration steps
+
+<Steps>
+
+<Step title="Initialize the logger">
+
+Create a logger instance with your service configuration:
+
+```typescript logger.ts
+import { widelogger } from "widelogger";
+
+export const { widelog, destroy } = widelogger({
+  service: "example-api",
+  defaultEventName: "http_request",
+  version: "1.0.0",
+  commitHash: process.env.COMMIT_SHA,
+});
+```
+
+</Step>
+
+<Step title="Create logging middleware">
+
+Build middleware that wraps each request in a logging context with error handling:
+
+```typescript middleware/logging.ts
+import type { MiddlewareHandler } from "hono";
+import { widelog } from "../logger";
+
+export const logging: MiddlewareHandler = async (context, next) => {
+  await widelog.context(async () => {
+    widelog.set("method", context.req.method);
+    widelog.set("path", context.req.path);
+    widelog.time.start("duration_ms");
+
+    try {
+      await next();
+      widelog.set("status_code", context.res.status);
+      widelog.set("outcome", "success");
+    } catch (error) {
+      widelog.set("status_code", 500);
+      widelog.set("outcome", "error");
+      widelog.errorFields(error);
+      throw error;
+    } finally {
+      widelog.time.stop("duration_ms");
+      widelog.flush();
+    }
+  });
+};
+```
+
+The middleware:
+- Wraps the entire request lifecycle in `widelog.context()`
+- Captures method, path, and timing for every request
+- Uses try-catch-finally to handle errors and ensure logs always flush
+- Adds structured error fields when exceptions occur
+- Records outcome status for easy filtering
+
+</Step>
+
+<Step title="Register middleware and routes">
+
+Apply the logging middleware globally and set up your routes:
+
+```typescript server.ts
+import { serve } from "bun";
+import { Hono } from "hono";
+import { destroy } from "./logger";
+import { logging } from "./middleware/logging";
+import { checkout } from "./routes/checkout";
+import { health } from "./routes/health";
+
+const app = new Hono();
+
+app.use(logging);
+app.get("/health", health);
+app.post("/checkout", checkout);
+
+const server = serve({
+  port: 3000,
+  fetch: app.fetch,
+});
+
+console.log(`Listening on http://localhost:${server.port}`);
+
+process.on("SIGINT", async () => {
+  server.stop();
+  await destroy();
+  process.exit(0);
+});
+```
+
+<Note>
+This example uses Bun's `serve()` to run the Hono app. You can also use Node.js with `@hono/node-server` or deploy to edge runtimes like Cloudflare Workers.
+</Note>
+
+</Step>
+
+<Step title="Add fields in route handlers">
+
+Enrich logs with request-specific data in your handlers:
+
+```typescript routes/checkout.ts
+import type { Context } from "hono";
+import { widelog } from "../logger";
+
+interface CheckoutBody {
+  userId: string;
+}
+
+export const checkout = async (context: Context) => {
+  const { userId } = await context.req.json<CheckoutBody>();
+
+  widelog.set("user.id", userId);
+  widelog.set("user.plan", "premium");
+
+  widelog.time.start("db_ms");
+  // const order = await processOrder(userId);
+  const order = { id: "ord_001", totalCents: 14_999, itemCount: 3 };
+  widelog.time.stop("db_ms");
+
+  widelog.set("order.id", order.id);
+  widelog.set("order.total_cents", order.totalCents);
+  widelog.count("order.items", order.itemCount);
+
+  return context.json({ orderId: order.id });
+};
+```
+
+All fields added within the same request automatically merge into the same wide event.
+
+</Step>
+
+</Steps>
+
+## Example output
+
+A successful request produces a single wide event with all collected fields:
+
+```json
+{
+  "service": "example-api",
+  "event": "http_request",
+  "version": "1.0.0",
+  "method": "POST",
+  "path": "/checkout",
+  "status_code": 200,
+  "outcome": "success",
+  "duration_ms": 40,
+  "user.id": "usr_123",
+  "user.plan": "premium",
+  "order.id": "ord_001",
+  "order.total_cents": 14999,
+  "order.items": 3,
+  "db_ms": 9
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use async middleware with await">
+    Hono middleware should be async and use `await widelog.context()` to ensure proper async context propagation throughout the request lifecycle.
+  </Accordion>
+  
+  <Accordion title="Always use try-catch-finally">
+    Wrap your `next()` call in try-catch-finally to handle errors gracefully and ensure logs flush even when errors occur.
+  </Accordion>
+  
+  <Accordion title="Track outcomes for observability">
+    Add an `outcome` field (`success`, `error`) to make it easy to filter and aggregate logs by result type in your observability platform.
+  </Accordion>
+  
+  <Accordion title="Leverage Hono's runtime flexibility">
+    Hono runs on multiple runtimes. When deploying to edge environments, ensure your logger configuration is compatible with the runtime's constraints (e.g., no filesystem access on Cloudflare Workers).
+  </Accordion>
+</AccordionGroup>
+
+## Runtime-specific considerations
+
+<Tabs>
+  <Tab title="Bun">
+    Shown in the examples above. Bun provides native TypeScript support and fast startup times. Use `bun run` to start your server.
+  </Tab>
+  
+  <Tab title="Node.js">
+    Install `@hono/node-server` and replace the server setup:
+    
+    ```typescript
+    import { serve } from '@hono/node-server'
+    
+    serve({
+      fetch: app.fetch,
+      port: 3000,
+    })
+    ```
+  </Tab>
+  
+  <Tab title="Cloudflare Workers">
+    Export your app as the default handler:
+    
+    ```typescript
+    export default app
+    ```
+    
+    Note: Graceful shutdown with `destroy()` is not applicable in edge environments. Logs flush automatically on each request.
+  </Tab>
+</Tabs>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Bun server integration" icon="server" href="/guides/bun">
+    Use WideLogger with vanilla Bun server
+  </Card>
+  <Card title="API reference" icon="book" href="/api/widelogger">
+    Explore all available logging methods
+  </Card>
+</CardGroup>

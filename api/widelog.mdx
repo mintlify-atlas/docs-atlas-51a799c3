@@ -1,0 +1,218 @@
+---
+title: widelog
+description: The widelog instance for recording structured events
+---
+
+The `widelog` instance provides methods for building up structured events using wide event logging patterns. All operations are accumulated in context and emitted as a single event when flushed.
+
+## Type
+
+```typescript
+type Widelog = {
+  set: <K extends string>(key: DottedKey<K>, value: FieldValue) => void;
+  count: <K extends string>(key: DottedKey<K>, amount?: number) => void;
+  append: <K extends string>(key: DottedKey<K>, value: FieldValue) => void;
+  max: <K extends string>(key: DottedKey<K>, value: number) => void;
+  min: <K extends string>(key: DottedKey<K>, value: number) => void;
+  time: {
+    start: <K extends string>(key: DottedKey<K>) => void;
+    stop: <K extends string>(key: DottedKey<K>) => void;
+  };
+  errorFields: (error: unknown, options?: ErrorFieldsOptions) => void;
+  flush: () => void;
+  context: <T>(callback: () => T | Promise<T>) => T | Promise<T>;
+}
+```
+
+## Methods
+
+### set()
+
+Sets a field to a specific value. If the field already exists, it is overwritten.
+
+```typescript
+widelog.set(key: DottedKey<K>, value: FieldValue) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key using dot notation (e.g., "user.id", "request.method")
+</ParamField>
+
+<ParamField path="value" type="FieldValue" required>
+  The value to set. Can be `string`, `number`, or `boolean`
+</ParamField>
+
+### count()
+
+Increments a numeric counter field by the specified amount.
+
+```typescript
+widelog.count(key: DottedKey<K>, amount?: number) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key for the counter
+</ParamField>
+
+<ParamField path="amount" type="number" default={1}>
+  The amount to increment by. Defaults to 1
+</ParamField>
+
+### append()
+
+Appends a value to an array field. If the field doesn't exist, creates a new array.
+
+```typescript
+widelog.append(key: DottedKey<K>, value: FieldValue) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key for the array
+</ParamField>
+
+<ParamField path="value" type="FieldValue" required>
+  The value to append to the array
+</ParamField>
+
+### max()
+
+Sets a field to the maximum of its current value and the provided value.
+
+```typescript
+widelog.max(key: DottedKey<K>, value: number) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  The value to compare against
+</ParamField>
+
+### min()
+
+Sets a field to the minimum of its current value and the provided value.
+
+```typescript
+widelog.min(key: DottedKey<K>, value: number) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  The value to compare against
+</ParamField>
+
+### time.start()
+
+Starts a timer for the specified key.
+
+```typescript
+widelog.time.start(key: DottedKey<K>) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key for the timer
+</ParamField>
+
+### time.stop()
+
+Stops a timer and records the elapsed time in milliseconds.
+
+```typescript
+widelog.time.stop(key: DottedKey<K>) => void
+```
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field key for the timer (must match a previous `time.start()` call)
+</ParamField>
+
+### errorFields()
+
+Extracts structured error information and adds it to the event.
+
+```typescript
+widelog.errorFields(error: unknown, options?: ErrorFieldsOptions) => void
+```
+
+<ParamField path="error" type="unknown" required>
+  The error to extract fields from. Can be an Error object, string, or any value
+</ParamField>
+
+<ParamField path="options" type="ErrorFieldsOptions">
+  Options for error field extraction
+  
+  <ParamField path="prefix" type="string" default="error">
+    The prefix for error fields (e.g., "error" creates "error.error_name", "error.error_message")
+  </ParamField>
+  
+  <ParamField path="includeStack" type="boolean" default={true}>
+    Whether to include the stack trace
+  </ParamField>
+</ParamField>
+
+### flush()
+
+Flushes the accumulated operations and emits the event to the logger.
+
+```typescript
+widelog.flush() => void
+```
+
+### context()
+
+Runs a callback within an isolated logging context. Operations in nested calls are accumulated independently.
+
+```typescript
+widelog.context<T>(callback: () => T | Promise<T>) => T | Promise<T>
+```
+
+<ParamField path="callback" type="() => T | Promise<T>" required>
+  The function to execute within the context. Can be synchronous or asynchronous
+</ParamField>
+
+Returns the result of the callback.
+
+## Example
+
+```typescript
+import { widelogger } from "widelogger";
+
+const { widelog } = widelogger({
+  service: "my-api",
+  defaultEventName: "api.request",
+});
+
+widelog.context(async () => {
+  widelog.set("request.method", "POST");
+  widelog.set("request.path", "/api/users");
+  
+  widelog.time.start("request.duration_ms");
+  
+  try {
+    await processRequest();
+    widelog.set("outcome", "success");
+    widelog.count("request.count");
+  } catch (error) {
+    widelog.set("outcome", "error");
+    widelog.errorFields(error);
+  } finally {
+    widelog.time.stop("request.duration_ms");
+    widelog.flush();
+  }
+});
+```
+
+## Key validation
+
+The `DottedKey<K>` type enforces the following rules for field keys:
+
+- Keys cannot be empty
+- Keys cannot start with a dot
+- Keys cannot end with a dot
+- Keys cannot contain empty segments (e.g., "foo..bar")
+
+These rules are enforced at compile time using TypeScript's type system.

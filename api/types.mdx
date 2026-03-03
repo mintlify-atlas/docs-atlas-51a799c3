@@ -1,0 +1,191 @@
+---
+title: Types
+description: TypeScript types and interfaces used in WideLogger
+---
+
+## FieldValue
+
+The basic value types that can be stored in wide event fields.
+
+```typescript
+type FieldValue = string | number | boolean;
+```
+
+This type represents the primitive values that WideLogger can log. All field values in wide events must be one of these three types.
+
+## DottedKey
+
+A type-safe string type for dotted notation keys with compile-time validation.
+
+```typescript
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+`DottedKey` ensures that keys follow valid dotted notation rules:
+- Cannot be empty
+- Cannot start with a dot
+- Cannot end with a dot
+- Cannot contain empty segments (e.g., `"key..value"`)
+
+TypeScript will provide compile-time errors if you try to use an invalid key format.
+
+**Example:**
+
+```typescript
+widelog.set("user.id", 123); // Valid
+widelog.set("request.headers.content_type", "application/json"); // Valid
+widelog.set(".invalid", "value"); // TypeScript error
+widelog.set("invalid.", "value"); // TypeScript error
+widelog.set("invalid..key", "value"); // TypeScript error
+```
+
+## Operation
+
+A discriminated union type representing all possible operations that can be performed on wide event fields.
+
+```typescript
+type Operation =
+  | { operation: "set"; key: string; value: FieldValue }
+  | { operation: "count"; key: string; amount: number }
+  | { operation: "append"; key: string; value: FieldValue }
+  | { operation: "max"; key: string; value: number }
+  | { operation: "min"; key: string; value: number }
+  | { operation: "time.start"; key: string; time: number }
+  | { operation: "time.stop"; key: string; time: number };
+```
+
+Each operation type corresponds to a method on the `widelog` object:
+
+| Operation | Description | Value Type |
+|-----------|-------------|------------|
+| `set` | Set a field to a specific value | `FieldValue` |
+| `count` | Increment a counter by a given amount | `number` |
+| `append` | Append a value to an array field | `FieldValue` |
+| `max` | Track the maximum value seen | `number` |
+| `min` | Track the minimum value seen | `number` |
+| `time.start` | Start a timer with performance.now() | `number` |
+| `time.stop` | Stop a timer with performance.now() | `number` |
+
+## Context
+
+The internal context object that stores operations within an async context.
+
+```typescript
+interface Context {
+  operations: Operation[];
+}
+```
+
+This interface represents the async local storage context that accumulates operations before they are flushed. You typically don't interact with this directly - it's managed internally by WideLogger.
+
+## WideloggerOptions
+
+Configuration options for initializing WideLogger.
+
+```typescript
+interface WideloggerOptions {
+  service: string;
+  defaultEventName: string;
+  version?: string;
+  commitHash?: string;
+  instanceId?: string;
+  environment?: string;
+  level?: string;
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `service` | `string` | Yes | The name of your service |
+| `defaultEventName` | `string` | Yes | Default event name for all logs |
+| `version` | `string` | No | Service version (e.g., "1.0.0") |
+| `commitHash` | `string` | No | Git commit hash. Defaults to "unknown" |
+| `instanceId` | `string` | No | Unique instance identifier. Defaults to process PID |
+| `environment` | `string` | No | Environment name. Defaults to NODE_ENV or "development" |
+| `level` | `string` | No | Log level. Defaults to LOG_LEVEL env var or "info" |
+
+**Example:**
+
+```typescript
+import { widelogger } from "widelogger";
+
+const { widelog, destroy } = widelogger({
+  service: "my-api",
+  defaultEventName: "request",
+  version: "1.0.0",
+  commitHash: process.env.COMMIT_SHA,
+  environment: "production",
+  level: "info"
+});
+```
+
+## ErrorFieldsOptions
+
+Options for configuring how error objects are logged.
+
+```typescript
+interface ErrorFieldsOptions {
+  prefix?: string;
+  includeStack?: boolean;
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `prefix` | `string` | No | `"error"` | Prefix for error field names |
+| `includeStack` | `boolean` | No | `true` | Whether to include the error stack trace |
+
+**Example:**
+
+```typescript
+try {
+  await riskyOperation();
+} catch (error) {
+  widelog.errorFields(error, { 
+    prefix: "db_error",
+    includeStack: true 
+  });
+  widelog.flush();
+}
+```
+
+This will create fields like `db_error.error_name`, `db_error.error_message`, and `db_error.error_stack`.
+
+## Widelog
+
+The main widelog object type containing all logging methods.
+
+```typescript
+type Widelog = ReturnType<typeof widelogger>["widelog"];
+```
+
+This type represents the widelog object returned by the `widelogger()` function. It includes all the logging methods:
+
+- `set()` - Set a field value
+- `count()` - Increment a counter
+- `append()` - Append to an array
+- `max()` - Track maximum value
+- `min()` - Track minimum value
+- `time.start()` - Start a timer
+- `time.stop()` - Stop a timer
+- `errorFields()` - Log error information
+- `flush()` - Flush accumulated operations
+- `context()` - Create a new async context
+
+This type is useful when you want to pass the widelog object as a parameter or store it in a variable with explicit typing.
+
+**Example:**
+
+```typescript
+import { widelogger, type Widelog } from "widelogger";
+
+const { widelog } = widelogger({
+  service: "my-service",
+  defaultEventName: "event"
+});
+
+function logRequest(widelog: Widelog, userId: string) {
+  widelog.set("user.id", userId);
+  widelog.count("requests");
+}
+```

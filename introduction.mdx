@@ -1,0 +1,124 @@
+---
+title: WideLogger
+description: Structured wide event logging for Node.js - accumulate context throughout a request lifecycle, then flush it as a single rich event
+---
+
+## Overview
+
+WideLogger is a structured logging SDK for Node.js that transforms how you capture application events. Instead of scattering multiple log statements throughout your code, WideLogger lets you accumulate context as your request flows through your application, then emit a single comprehensive event at the end.
+
+Built on [Pino](https://github.com/pinojs/pino) and `AsyncLocalStorage`, WideLogger provides zero-leak context isolation across concurrent requests — perfect for modern async Node.js applications.
+
+## Why wide events?
+
+Traditional logging creates multiple log entries per request, making it difficult to understand the full story. Wide event logging, inspired by [loggingsucks.com](https://loggingsucks.com), accumulates all relevant context into a single structured event:
+
+```json
+{
+  "event_name": "http_request",
+  "method": "POST",
+  "path": "/checkout",
+  "user": {
+    "id": "usr_123",
+    "plan": "premium"
+  },
+  "order": {
+    "id": "ord_001",
+    "total_cents": 14999,
+    "items": 3
+  },
+  "db_ms": 42,
+  "duration_ms": 156,
+  "status_code": 200
+}
+```
+
+One request, one event, complete story.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Context isolation" icon="shield-halved">
+    AsyncLocalStorage ensures concurrent requests never interfere with each other
+  </Card>
+  <Card title="Rich accumulation" icon="layer-group">
+    Set fields, count events, track timings, min/max values, and arrays in one place
+  </Card>
+  <Card title="Automatic routing" icon="route">
+    Errors and 5xx responses automatically log at error level
+  </Card>
+  <Card title="Zero dependencies*" icon="feather">
+    Just Pino and AsyncLocalStorage — no heavy frameworks required
+  </Card>
+</CardGroup>
+
+<Note>
+  *WideLogger depends on `pino` and `pino-pretty` for the underlying logging infrastructure
+</Note>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install WideLogger with your favorite package manager
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first wide event logger in under 5 minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/widelogger">
+    Complete API documentation and method reference
+  </Card>
+  <Card title="Integration Guides" icon="book-open" href="/guides/express">
+    Working examples for Express, Fastify, Hono, and Bun
+  </Card>
+</CardGroup>
+
+## How it works
+
+<Steps>
+  <Step title="Create a logger instance">
+    Initialize WideLogger with your service metadata
+    ```ts
+    const { widelog, destroy } = widelogger({
+      service: "checkout-api",
+      defaultEventName: "http_request"
+    });
+    ```
+  </Step>
+  <Step title="Wrap requests in context">
+    Use middleware to create isolated context for each request
+    ```ts
+    app.use((req, res, next) => {
+      widelog.context(async () => {
+        // Your request handling
+      });
+    });
+    ```
+  </Step>
+  <Step title="Accumulate fields anywhere">
+    Add context from route handlers, services, or utilities
+    ```ts
+    widelog.set("user.id", userId);
+    widelog.time.start("db_ms");
+    widelog.count("items", 3);
+    ```
+  </Step>
+  <Step title="Flush the event">
+    Emit the complete structured event when the request finishes
+    ```ts
+    widelog.flush();
+    ```
+  </Step>
+</Steps>
+
+## Platform support
+
+WideLogger works seamlessly with all popular Node.js frameworks:
+
+- **Express** - Classic middleware pattern
+- **Fastify** - Plugin-based integration
+- **Hono** - Lightweight and fast
+- **Bun** - Native Bun server support
+- **Custom** - Use with any async Node.js application
+
+Check out the [integration guides](/guides/express) for complete working implementations.

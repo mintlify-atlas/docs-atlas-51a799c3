@@ -1,0 +1,248 @@
+---
+title: Dot notation
+description: Understanding WideLogger's dot notation system for structured event fields
+---
+
+WideLogger uses a dot notation key system to create structured, nested event data. This allows you to organize related fields hierarchically without manually creating nested objects.
+
+## Basic dot notation
+
+Instead of creating nested objects manually, you use dot-separated keys:
+
+```typescript
+// Set nested fields with dot notation
+widelog.set('http.method', 'GET');
+widelog.set('http.path', '/api/users');
+widelog.set('http.status_code', 200);
+
+widelog.count('db.queries', 3);
+widelog.set('db.provider', 'postgres');
+
+widelog.flush();
+```
+
+This produces a structured event:
+
+```json
+{
+  "http": {
+    "method": "GET",
+    "path": "/api/users",
+    "status_code": 200
+  },
+  "db": {
+    "queries": 3,
+    "provider": "postgres"
+  }
+}
+```
+
+## How nesting works
+
+WideLogger's `flush()` function transforms dot-notation keys into nested objects using the `setNested` function:
+
+```typescript
+// From flush.ts:6-34
+const setNested = (
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown
+) => {
+  const parts = key.split(".");
+  if (parts.length === 1) {
+    target[key] = value;
+    return;
+  }
+
+  const lastIndex = parts.length - 1;
+  let current = target;
+
+  for (let i = 0; i < lastIndex; i++) {
+    const part = parts[i] ?? "";
+    const existing = current[part];
+    if (isRecord(existing)) {
+      current = existing;
+    } else {
+      const next: Record<string, unknown> = Object.create(null);
+      current[part] = next;
+      current = next;
+    }
+  }
+
+  const lastPart = parts[lastIndex] ?? "";
+  current[lastPart] = value;
+};
+```
+
+This function:
+1. Splits the key by dots
+2. Traverses/creates nested objects for each segment
+3. Sets the value at the final key
+
+## Type-safe keys
+
+WideLogger provides compile-time validation for dot notation keys using TypeScript's template literal types:
+
+```typescript
+// From types.ts:8-16
+type ValidateKey<T extends string> = T extends ""
+  ? "widelog keys cannot be empty" & KeyErrorBrand
+  : T extends `.${string}`
+    ? "widelog keys cannot start with a dot" & KeyErrorBrand
+    : T extends `${string}.`
+      ? "widelog keys cannot end with a dot" & KeyErrorBrand
+      : T extends `${string}..${string}`
+        ? "widelog keys cannot contain empty segments" & KeyErrorBrand
+        : T;
+
+export type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+This prevents invalid keys at compile time:
+
+```typescript
+// ✅ Valid keys
+widelog.set('user_id', '123');
+widelog.set('request.id', 'abc');
+widelog.set('metrics.response.size', 1024);
+
+// ❌ Compile errors
+widelog.set('', 'value');              // keys cannot be empty
+widelog.set('.invalid', 'value');      // cannot start with dot
+widelog.set('invalid.', 'value');      // cannot end with dot
+widelog.set('invalid..key', 'value');  // no empty segments
+```
+
+<Tip>
+The type system catches these errors before runtime, making your logging code more reliable.
+</Tip>
+
+## Deep nesting
+
+You can nest as deeply as needed:
+
+```typescript
+widelog.set('trace.span.id', 'abc123');
+widelog.set('trace.span.parent_id', 'xyz789');
+widelog.set('trace.span.duration_ms', 42);
+widelog.set('trace.service.name', 'api');
+widelog.set('trace.service.version', '1.2.3');
+
+widelog.flush();
+```
+
+Result:
+
+```json
+{
+  "trace": {
+    "span": {
+      "id": "abc123",
+      "parent_id": "xyz789",
+      "duration_ms": 42
+    },
+    "service": {
+      "name": "api",
+      "version": "1.2.3"
+    }
+  }
+}
+```
+
+## Works with all operations
+
+Dot notation works with every WideLogger operation:
+
+```typescript
+// Set values
+widelog.set('user.id', '12345');
+widelog.set('user.email', 'user@example.com');
+
+// Count events
+widelog.count('cache.hits');
+widelog.count('cache.misses');
+
+// Append to arrays
+widelog.append('request.headers', 'Authorization');
+widelog.append('request.headers', 'Content-Type');
+
+// Track min/max
+widelog.max('response.body.size', 2048);
+widelog.min('db.query.latency', 15);
+
+// Time operations
+widelog.time.start('external.api.duration');
+// ... call external API
+widelog.time.stop('external.api.duration');
+
+widelog.flush();
+```
+
+<Info>
+All operations apply their logic first (counting, appending, finding min/max, timing), then the results are nested during flush.
+</Info>
+
+## Error fields with prefixes
+
+The `errorFields` helper uses dot notation to namespace error data:
+
+```typescript
+// Default prefix is 'error'
+try {
+  await queryDatabase();
+} catch (err) {
+  widelog.errorFields(err);
+  widelog.set('status_code', 500);
+  widelog.flush();
+}
+
+// Custom prefix for multiple errors
+try {
+  await primaryDB.query();
+} catch (err) {
+  widelog.errorFields(err, { prefix: 'primary_db' });
+}
+
+try {
+  await cacheDB.query();
+} catch (err) {
+  widelog.errorFields(err, { prefix: 'cache_db' });
+}
+
+widelog.flush();
+```
+
+This creates cleanly separated error data:
+
+```json
+{
+  "primary_db": {
+    "error_name": "ConnectionError",
+    "error_message": "Connection refused"
+  },
+  "cache_db": {
+    "error_name": "TimeoutError",
+    "error_message": "Query timeout"
+  }
+}
+```
+
+## Naming conventions
+
+For consistent, queryable logs, use snake_case for all key segments:
+
+```typescript
+// ✅ Good - consistent snake_case
+widelog.set('user_id', '123');
+widelog.set('request.user_agent', 'Mozilla/5.0');
+widelog.set('db.connection.pool_size', 10);
+
+// ❌ Avoid mixing conventions
+widelog.set('userId', '123');           // camelCase
+widelog.set('request.UserAgent', '...'); // PascalCase
+widelog.set('db-pool-size', 10);        // kebab-case
+```
+
+<Note>
+Consistent naming makes it easier to query and analyze your logs in tools like Splunk, Datadog, or Elasticsearch.
+</Note>

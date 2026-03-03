@@ -1,0 +1,87 @@
+---
+title: widelogger()
+description: Factory function to create a WideLogger instance
+---
+
+The `widelogger()` factory function creates a new WideLogger instance with the specified configuration options.
+
+## Signature
+
+```typescript
+function widelogger(options: WideloggerOptions): {
+  widelog: Widelog;
+  destroy: () => Promise<void>;
+}
+```
+
+## Parameters
+
+<ParamField path="options" type="WideloggerOptions" required>
+  Configuration options for the logger instance
+  
+  <ParamField path="service" type="string" required>
+    The name of your service or application
+  </ParamField>
+  
+  <ParamField path="defaultEventName" type="string" required>
+    The default event name to use for all logged events
+  </ParamField>
+  
+  <ParamField path="version" type="string">
+    The version of your service (e.g., "1.0.0")
+  </ParamField>
+  
+  <ParamField path="commitHash" type="string">
+    The git commit hash of the deployed code. Defaults to "unknown"
+  </ParamField>
+  
+  <ParamField path="instanceId" type="string">
+    A unique identifier for this instance. Defaults to the process PID
+  </ParamField>
+  
+  <ParamField path="environment" type="string">
+    The deployment environment (e.g., "production", "staging", "development"). Defaults to `process.env.NODE_ENV` or "development"
+  </ParamField>
+  
+  <ParamField path="level" type="string">
+    The minimum log level to emit. Defaults to `process.env.LOG_LEVEL` or "info". Common values: "trace", "debug", "info", "warn", "error", "fatal"
+  </ParamField>
+</ParamField>
+
+## Returns
+
+<ResponseField name="widelog" type="Widelog">
+  The widelog instance for logging operations. See [widelog](/api/widelog) for details.
+</ResponseField>
+
+<ResponseField name="destroy" type="() => Promise<void>">
+  Cleanup function to gracefully shut down the logger. See [destroy](/api/destroy) for details.
+</ResponseField>
+
+## Example
+
+```typescript
+import { widelogger } from "widelogger";
+
+const { widelog, destroy } = widelogger({
+  service: "my-api",
+  defaultEventName: "api.request",
+  version: "1.0.0",
+  commitHash: "abc123",
+  environment: "production",
+  level: "info",
+});
+
+// Use widelog instance...
+
+// When shutting down
+await destroy();
+```
+
+## Behavior
+
+- In non-production environments, logs are formatted using `pino-pretty` for better readability
+- In production environments, logs are output as JSON for structured logging
+- The logger automatically includes service metadata in all log events
+- Events with `status_code >= 500` or `outcome: "error"` are logged at error level
+- All other events are logged at info level

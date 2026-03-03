@@ -1,0 +1,127 @@
+---
+title: Installation
+description: Install WideLogger using your preferred Node.js package manager
+---
+
+## Install the package
+
+WideLogger is available on npm and works with all major Node.js package managers:
+
+<CodeGroup>
+
+```bash npm
+npm install widelogger
+```
+
+```bash pnpm
+pnpm add widelogger
+```
+
+```bash yarn
+yarn add widelogger
+```
+
+```bash bun
+bun add widelogger
+```
+
+</CodeGroup>
+
+## Dependencies
+
+WideLogger has two peer dependencies that are automatically installed:
+
+- **pino** - Fast and low overhead Node.js logger
+- **pino-pretty** - Pretty printer for development
+
+These are the only dependencies WideLogger requires.
+
+## Requirements
+
+WideLogger requires:
+
+- **Node.js 18+** or **Bun 1.0+**
+- ES modules support (type: "module" in package.json)
+
+<Note>
+  WideLogger uses `AsyncLocalStorage` from Node.js built-in `async_hooks` module, which requires Node.js 18 or higher.
+</Note>
+
+## Verify installation
+
+After installation, verify WideLogger is working by creating a simple test:
+
+```ts test.ts
+import { widelogger } from "widelogger";
+
+const { widelog, destroy } = widelogger({
+  service: "test",
+  defaultEventName: "test_event",
+});
+
+widelog.context(() => {
+  widelog.set("message", "Hello, WideLogger!");
+  widelog.flush();
+});
+
+await destroy();
+```
+
+Run the test:
+
+<CodeGroup>
+
+```bash node
+node test.ts
+```
+
+```bash bun
+bun test.ts
+```
+
+</CodeGroup>
+
+You should see a formatted log output with your test event:
+
+```json
+{
+  "level": 30,
+  "time": "2026-03-03T...",
+  "service": "test",
+  "event_name": "test_event",
+  "message": "Hello, WideLogger!"
+}
+```
+
+<Tip>
+  In development mode (NODE_ENV !== "production"), logs are automatically pretty-printed with colors. In production, you'll get structured JSON.
+</Tip>
+
+## TypeScript support
+
+WideLogger is written in TypeScript and includes type definitions out of the box. No additional `@types` packages are needed.
+
+The package provides strong type safety for dotted keys, rejecting invalid patterns at compile time:
+
+```ts
+// ✅ Valid
+widelog.set("user.id", "123");
+widelog.set("order.total_cents", 1499);
+
+// ❌ Compile errors
+widelog.set("", "value");           // Empty string
+widelog.set(".user", "value");      // Leading dot
+widelog.set("user.", "value");      // Trailing dot
+widelog.set("user..id", "value");   // Double dots
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first wide event logger
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/widelogger">
+    Explore the complete API
+  </Card>
+</CardGroup>

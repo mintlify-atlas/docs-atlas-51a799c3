@@ -1,0 +1,117 @@
+---
+title: append()
+description: Append a value to an array field in the current logging context
+---
+
+The `append()` method adds a value to an array field. If the field doesn't exist, it creates a new array with the value. Multiple calls to `append()` with the same key create an array with all appended values.
+
+## Signature
+
+```typescript
+widelog.append<K extends string>(key: DottedKey<K>, value: FieldValue): void
+```
+
+## Parameters
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field name using dot notation for nested fields. The key cannot be empty, start or end with a dot, or contain empty segments (consecutive dots).
+</ParamField>
+
+<ParamField path="value" type="FieldValue" required>
+  The value to append to the array. Must be a string, number, or boolean.
+</ParamField>
+
+## Type definitions
+
+```typescript
+type FieldValue = string | number | boolean;
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+## Examples
+
+### Building an array
+
+```javascript
+widelog.context(() => {
+  widelog.append('tags', 'production');
+  widelog.append('tags', 'api');
+  widelog.append('tags', 'critical');
+  widelog.flush();
+});
+```
+
+### Collecting error messages
+
+```javascript
+widelog.context(async () => {
+  const results = await validateInput(data);
+  
+  results.errors.forEach(error => {
+    widelog.append('validation.errors', error.message);
+  });
+  
+  widelog.flush();
+});
+```
+
+### Tracking steps in a process
+
+```javascript
+widelog.context(async () => {
+  widelog.append('steps', 'start');
+  
+  await fetchData();
+  widelog.append('steps', 'data_fetched');
+  
+  await processData();
+  widelog.append('steps', 'data_processed');
+  
+  await saveData();
+  widelog.append('steps', 'data_saved');
+  
+  widelog.flush();
+});
+```
+
+### Nested array fields
+
+```javascript
+widelog.context(() => {
+  widelog.append('request.headers.accept', 'application/json');
+  widelog.append('request.headers.accept', 'text/html');
+  widelog.flush();
+});
+```
+
+### Mixed value types
+
+```javascript
+widelog.context(() => {
+  widelog.append('events', 'user_login');        // string
+  widelog.append('status_codes', 200);           // number
+  widelog.append('success_flags', true);         // boolean
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "event_name": "pipeline_execution",
+  "tags": ["production", "api", "critical"],
+  "steps": ["start", "data_fetched", "data_processed", "data_saved"],
+  "validation": {
+    "errors": ["Invalid email format", "Password too short"]
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- Multiple `append()` calls with the same key create an array preserving order
+- Use dot notation to create nested array structures
+- Arrays maintain insertion order

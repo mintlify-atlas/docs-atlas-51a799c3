@@ -1,0 +1,156 @@
+---
+title: Context isolation
+description: Understanding how WideLogger uses AsyncLocalStorage for concurrent request handling
+---
+
+WideLogger uses Node.js's `AsyncLocalStorage` API to provide automatic context isolation for concurrent operations. This means you can safely log events from multiple requests simultaneously without data mixing between them.
+
+## How context isolation works
+
+Each call to `widelog.context()` creates an isolated execution context that maintains its own set of operations. All logging operations within that context are tracked independently:
+
+```typescript
+const { widelog } = widelogger({
+  service: 'api-server',
+  defaultEventName: 'http.request'
+});
+
+// Handle two concurrent requests
+await Promise.all([
+  widelog.context(async () => {
+    widelog.set('request_id', 'req-001');
+    widelog.set('method', 'GET');
+    await processRequest();
+    widelog.flush();
+  }),
+  
+  widelog.context(async () => {
+    widelog.set('request_id', 'req-002');
+    widelog.set('method', 'POST');
+    await processRequest();
+    widelog.flush();
+  })
+]);
+```
+
+Each request maintains its own `request_id` and `method` values, even though they execute concurrently. There's no risk of data leakage between contexts.
+
+## Under the hood
+
+WideLogger uses `AsyncLocalStorage` from Node.js's `async_hooks` module to maintain context:
+
+```typescript
+// From index.ts:84
+const storage = new AsyncLocalStorage<Context>();
+
+// Context contains an operations array
+interface Context {
+  operations: Operation[];
+}
+```
+
+When you call operations like `widelog.set()`, `widelog.count()`, or `widelog.time.start()`, they push to the current context's operations array:
+
+```typescript
+// From index.ts:134-136
+set: <K extends string>(key: DottedKey<K>, value: FieldValue) => {
+  storage.getStore()?.operations.push({ operation: "set", key, value });
+}
+```
+
+<Note>
+The `?.` optional chaining operator makes operations safe to call outside a context - they simply become no-ops if there's no active context.
+</Note>
+
+## Synchronous contexts
+
+Contexts work with both synchronous and asynchronous code:
+
+```typescript
+// Synchronous
+const result = widelog.context(() => {
+  widelog.set('operation', 'sync-calc');
+  const answer = 42;
+  widelog.set('result', answer);
+  widelog.flush();
+  return answer;
+});
+
+// Asynchronous
+const result = await widelog.context(async () => {
+  widelog.set('operation', 'async-fetch');
+  const data = await fetchData();
+  widelog.set('status', 'success');
+  widelog.flush();
+  return data;
+});
+```
+
+Both patterns provide full context isolation and return the callback's result.
+
+## Context cleanup
+
+WideLogger automatically clears context operations after execution to prevent memory leaks:
+
+```typescript
+// From index.ts:114-130
+function runContext<T>(callback: () => T | Promise<T>): T | Promise<T> {
+  return storage.run({ operations: [] }, () => {
+    let result: T | Promise<T>;
+    try {
+      result = callback();
+    } catch (error) {
+      clearContext();
+      throw error;
+    }
+
+    if (result instanceof Promise) {
+      return result.finally(clearContext);
+    }
+
+    clearContext();
+    return result;
+  });
+}
+```
+
+<Info>
+Context cleanup happens automatically whether your callback succeeds, throws an error, or returns a rejected promise.
+</Info>
+
+## Real-world example: Express middleware
+
+Here's how context isolation enables clean request logging in Express:
+
+```typescript
+import express from 'express';
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'api',
+  defaultEventName: 'http.request'
+});
+
+const app = express();
+
+app.use((req, res, next) => {
+  widelog.context(async () => {
+    // Each request gets isolated context
+    widelog.set('request_id', req.headers['x-request-id']);
+    widelog.set('method', req.method);
+    widelog.set('path', req.path);
+    widelog.time.start('duration');
+    
+    // Track response
+    res.on('finish', () => {
+      widelog.time.stop('duration');
+      widelog.set('status_code', res.statusCode);
+      widelog.flush();
+    });
+    
+    next();
+  });
+});
+```
+
+Even under high concurrent load, each request's metrics remain completely isolated.

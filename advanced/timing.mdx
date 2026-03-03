@@ -1,0 +1,246 @@
+---
+title: Performance timing
+description: Track operation duration using time.start() and time.stop()
+---
+
+WideLogger provides built-in performance timing capabilities through `time.start()` and `time.stop()`. These methods automatically calculate the duration of operations and add them to your wide event.
+
+## Basic usage
+
+Wrap any operation between `time.start()` and `time.stop()` to measure its duration:
+
+```typescript
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'api',
+  defaultEventName: 'request',
+});
+
+widelog.context(async () => {
+  widelog.set('endpoint', '/api/data');
+  
+  widelog.time.start('database_query');
+  const results = await db.query('SELECT * FROM users');
+  widelog.time.stop('database_query');
+  
+  widelog.set('result_count', results.length);
+  widelog.flush();
+});
+
+// Logged event includes:
+// database_query_duration_ms: 45.2
+```
+
+<Note>
+Durations are measured in milliseconds with sub-millisecond precision using the high-resolution `performance.now()` timer.
+</Note>
+
+## Timing multiple operations
+
+You can track multiple operations in a single event by using different field names:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('user_id', '12345');
+  
+  // Time database query
+  widelog.time.start('db_query');
+  const user = await db.findUser('12345');
+  widelog.time.stop('db_query');
+  
+  // Time external API call
+  widelog.time.start('api_call');
+  const profile = await fetchUserProfile(user.id);
+  widelog.time.stop('api_call');
+  
+  // Time data processing
+  widelog.time.start('processing');
+  const enriched = enrichUserData(user, profile);
+  widelog.time.stop('processing');
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// db_query_duration_ms: 23.4
+// api_call_duration_ms: 156.7
+// processing_duration_ms: 2.1
+```
+
+<Tip>
+Use descriptive names for your timing fields to make it easy to identify which operation each duration represents in your logs.
+</Tip>
+
+## Dotted notation for organization
+
+Use dotted notation to organize related timings hierarchically:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'user_registration');
+  
+  widelog.time.start('validation.email');
+  await validateEmail(email);
+  widelog.time.stop('validation.email');
+  
+  widelog.time.start('validation.password');
+  await validatePassword(password);
+  widelog.time.stop('validation.password');
+  
+  widelog.time.start('db.insert');
+  await db.createUser({ email, password });
+  widelog.time.stop('db.insert');
+  
+  widelog.time.start('notification.email');
+  await sendWelcomeEmail(email);
+  widelog.time.stop('notification.email');
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// validation.email_duration_ms: 12.3
+// validation.password_duration_ms: 8.7
+// db.insert_duration_ms: 34.5
+// notification.email_duration_ms: 89.2
+```
+
+## Total request timing
+
+Track the entire request duration to measure overall performance:
+
+```typescript
+import express from 'express';
+
+app.use(async (req, res, next) => {
+  await widelog.context(async () => {
+    widelog.time.start('request.total');
+    
+    widelog.set('method', req.method);
+    widelog.set('path', req.path);
+    
+    // Let request handlers run
+    await next();
+    
+    widelog.time.stop('request.total');
+    widelog.set('status_code', res.statusCode);
+    widelog.flush();
+  });
+});
+```
+
+## Timing with error handling
+
+Ensure timing stops even when errors occur:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'process_payment');
+  
+  widelog.time.start('payment');
+  
+  try {
+    const result = await processPayment(amount, cardToken);
+    widelog.set('outcome', 'success');
+    widelog.set('transaction_id', result.id);
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.set('outcome', 'error');
+  } finally {
+    widelog.time.stop('payment');
+    widelog.flush();
+  }
+});
+
+// Duration is captured regardless of success or failure
+```
+
+<Warning>
+Always call `time.stop()` for every `time.start()`, preferably in a `finally` block, to ensure durations are captured even when errors occur.
+</Warning>
+
+## Performance monitoring example
+
+Here's a complete example showing how to use timing for performance monitoring:
+
+```typescript
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'data-pipeline',
+  defaultEventName: 'pipeline_run',
+});
+
+async function runDataPipeline(jobId: string) {
+  await widelog.context(async () => {
+    widelog.set('job_id', jobId);
+    widelog.time.start('total');
+    
+    try {
+      // Extract data
+      widelog.time.start('extract');
+      const rawData = await extractFromSource();
+      widelog.time.stop('extract');
+      widelog.set('extracted_records', rawData.length);
+      
+      // Transform data
+      widelog.time.start('transform');
+      const transformed = await transformData(rawData);
+      widelog.time.stop('transform');
+      widelog.set('transformed_records', transformed.length);
+      
+      // Validate data
+      widelog.time.start('validate');
+      const validated = await validateData(transformed);
+      widelog.time.stop('validate');
+      widelog.set('valid_records', validated.length);
+      
+      // Load data
+      widelog.time.start('load');
+      await loadToDestination(validated);
+      widelog.time.stop('load');
+      
+      widelog.set('outcome', 'success');
+      
+    } catch (error) {
+      widelog.errorFields(error);
+      widelog.set('outcome', 'error');
+    } finally {
+      widelog.time.stop('total');
+      widelog.flush();
+    }
+  });
+}
+```
+
+## Analyzing performance
+
+With consistent timing instrumentation, you can analyze performance patterns:
+
+```typescript
+// Example logged event:
+{
+  "event_name": "pipeline_run",
+  "job_id": "job-789",
+  "extracted_records": 10000,
+  "transformed_records": 9950,
+  "valid_records": 9945,
+  "extract_duration_ms": 234.5,
+  "transform_duration_ms": 1567.3,
+  "validate_duration_ms": 89.2,
+  "load_duration_ms": 445.8,
+  "total_duration_ms": 2340.1,
+  "outcome": "success"
+}
+```
+
+You can then query your logs to:
+- Identify slow operations (e.g., WHERE `transform_duration_ms` > 2000)
+- Calculate percentiles for each operation
+- Track performance trends over time
+- Set up alerts for performance degradation
+
+<Tip>
+Combine timing data with other fields like record counts to calculate throughput metrics (e.g., records per second).
+</Tip>

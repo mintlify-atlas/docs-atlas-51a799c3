@@ -1,0 +1,117 @@
+---
+title: count()
+description: Increment a numeric counter field in the current logging context
+---
+
+The `count()` method increments a counter field by a specified amount. If the field doesn't exist, it starts at 0 and adds the amount. Multiple calls to `count()` with the same key accumulate.
+
+## Signature
+
+```typescript
+widelog.count<K extends string>(key: DottedKey<K>, amount?: number): void
+```
+
+## Parameters
+
+<ParamField path="key" type="DottedKey<string>" required>
+  The field name using dot notation for nested fields. The key cannot be empty, start or end with a dot, or contain empty segments (consecutive dots).
+</ParamField>
+
+<ParamField path="amount" type="number" default="1">
+  The amount to increment the counter by. Defaults to 1 if not specified.
+</ParamField>
+
+## Type definitions
+
+```typescript
+type DottedKey<T extends string> = ValidateKey<T>;
+```
+
+## Examples
+
+### Basic counting
+
+```javascript
+widelog.context(() => {
+  widelog.count('requests');        // Increments by 1
+  widelog.count('requests');        // Increments by 1 again
+  widelog.count('requests');        // Total will be 3
+  widelog.flush();
+});
+```
+
+### Custom increment amount
+
+```javascript
+widelog.context(() => {
+  widelog.count('bytes_processed', 1024);
+  widelog.count('bytes_processed', 2048);
+  // Total will be 3072
+  widelog.flush();
+});
+```
+
+### Counting different metrics
+
+```javascript
+widelog.context(() => {
+  widelog.count('database.queries');
+  widelog.count('cache.hits');
+  widelog.count('cache.misses');
+  widelog.count('database.queries');
+  widelog.flush();
+});
+```
+
+### Nested counter fields
+
+```javascript
+widelog.context(() => {
+  widelog.count('http.requests.get');
+  widelog.count('http.requests.post');
+  widelog.count('http.requests.get');
+  widelog.flush();
+});
+```
+
+### Tracking errors and successes
+
+```javascript
+widelog.context(async () => {
+  const results = await Promise.allSettled(promises);
+  
+  results.forEach(result => {
+    if (result.status === 'fulfilled') {
+      widelog.count('tasks.succeeded');
+    } else {
+      widelog.count('tasks.failed');
+    }
+  });
+  
+  widelog.flush();
+});
+```
+
+## Output example
+
+```json
+{
+  "event_name": "batch_process",
+  "requests": 3,
+  "database": {
+    "queries": 2
+  },
+  "cache": {
+    "hits": 1,
+    "misses": 1
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- Multiple `count()` calls with the same key accumulate the total
+- The amount parameter can be any number, including negative values for decrementing
+- Use dot notation to create nested counter structures

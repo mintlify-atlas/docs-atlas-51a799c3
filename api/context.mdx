@@ -1,0 +1,82 @@
+---
+title: context()
+description: Run code within an isolated logging context that accumulates operations and automatically flushes on completion
+---
+
+The `context()` method creates an isolated logging context using Node.js AsyncLocalStorage. All logging operations within the callback are accumulated and automatically flushed when the callback completes.
+
+## Signature
+
+```typescript
+widelog.context<T>(callback: () => T | Promise<T>): T | Promise<T>
+```
+
+## Parameters
+
+<ParamField path="callback" type="() => T | Promise<T>" required>
+  The function to execute within the logging context. Can be synchronous or asynchronous.
+</ParamField>
+
+## Returns
+
+Returns the value returned by the callback. If the callback returns a Promise, `context()` returns a Promise that resolves to the callback's value.
+
+## Behavior
+
+- Creates a new isolated logging context
+- Accumulates all logging operations during callback execution
+- Automatically clears the context when the callback completes (success or error)
+- Supports both synchronous and asynchronous callbacks
+- Context is isolated per async execution path
+
+## Examples
+
+### Synchronous context
+
+```javascript
+const result = widelog.context(() => {
+  widelog.set('user.id', '123');
+  widelog.count('requests');
+  widelog.flush();
+  return 'done';
+});
+```
+
+### Asynchronous context
+
+```javascript
+await widelog.context(async () => {
+  widelog.set('operation', 'process_payment');
+  await processPayment();
+  widelog.set('status', 'success');
+  widelog.flush();
+});
+```
+
+### Express middleware example
+
+```javascript
+app.use((req, res, next) => {
+  widelog.context(async () => {
+    widelog.set('http.method', req.method);
+    widelog.set('http.path', req.path);
+    
+    try {
+      await next();
+      widelog.set('http.status_code', res.statusCode);
+    } catch (error) {
+      widelog.errorFields(error);
+      widelog.set('outcome', 'error');
+    } finally {
+      widelog.flush();
+    }
+  });
+});
+```
+
+## Notes
+
+- The context is automatically cleared even if the callback throws an error
+- Multiple concurrent contexts are isolated from each other
+- You must call `widelog.flush()` explicitly to emit the log event
+- Operations outside of a context are silently ignored

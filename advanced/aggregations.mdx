@@ -1,0 +1,342 @@
+---
+title: Aggregation operations
+description: Use count(), append(), max(), and min() to aggregate data within an event
+---
+
+WideLogger provides aggregation operations that accumulate values within a single wide event. These operations are particularly useful when you need to count occurrences, collect lists of values, or track minimum and maximum values across multiple operations.
+
+## count()
+
+Increment a numeric counter each time an operation occurs:
+
+```typescript
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'api',
+  defaultEventName: 'request',
+});
+
+widelog.context(async () => {
+  widelog.set('endpoint', '/api/batch-process');
+  
+  for (const item of items) {
+    try {
+      await processItem(item);
+      widelog.count('processed');
+    } catch (error) {
+      widelog.count('failed');
+    }
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// processed: 47
+// failed: 3
+```
+
+### Counting with custom amounts
+
+You can increment by values other than 1:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'bulk_upload');
+  
+  for (const batch of batches) {
+    const result = await uploadBatch(batch);
+    widelog.count('total_records', batch.length);
+    widelog.count('successful_records', result.successCount);
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// total_records: 1000
+// successful_records: 987
+```
+
+<Note>
+The `count()` operation accumulates values across multiple calls with the same key, making it perfect for tracking totals in loops.
+</Note>
+
+## append()
+
+Collect multiple values into an array:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'multi_service_call');
+  
+  const services = ['auth', 'billing', 'notifications'];
+  
+  for (const service of services) {
+    try {
+      await callService(service);
+      widelog.append('successful_services', service);
+    } catch (error) {
+      widelog.append('failed_services', service);
+    }
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// successful_services: ["auth", "billing"]
+// failed_services: ["notifications"]
+```
+
+### Collecting error messages
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'validation');
+  
+  const errors = [];
+  
+  if (!email) {
+    widelog.append('validation_errors', 'Email is required');
+  }
+  
+  if (!password || password.length < 8) {
+    widelog.append('validation_errors', 'Password must be at least 8 characters');
+  }
+  
+  if (!termsAccepted) {
+    widelog.append('validation_errors', 'Must accept terms and conditions');
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// validation_errors: ["Email is required", "Password must be at least 8 characters"]
+```
+
+<Tip>
+Use `append()` to collect diagnostic information throughout a request, such as which features were used, which rules were evaluated, or which services were called.
+</Tip>
+
+## max()
+
+Track the maximum value encountered across multiple operations:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'batch_processing');
+  
+  for (const item of items) {
+    const startTime = performance.now();
+    await processItem(item);
+    const duration = performance.now() - startTime;
+    
+    widelog.max('max_item_duration_ms', duration);
+    widelog.count('items_processed');
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// items_processed: 100
+// max_item_duration_ms: 234.5
+```
+
+### Tracking maximum payload sizes
+
+```typescript
+widelog.context(async () => {
+  widelog.set('endpoint', '/api/webhooks');
+  
+  for (const webhook of webhooks) {
+    const payloadSize = JSON.stringify(webhook.payload).length;
+    widelog.max('max_payload_size_bytes', payloadSize);
+    
+    await sendWebhook(webhook);
+    widelog.count('webhooks_sent');
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// webhooks_sent: 15
+// max_payload_size_bytes: 8192
+```
+
+<Warning>
+The `max()` operation only works with numeric values. Passing non-numeric values will result in unexpected behavior.
+</Warning>
+
+## min()
+
+Track the minimum value encountered across multiple operations:
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'rate_check');
+  
+  for (const provider of providers) {
+    const rate = await provider.getRate(currency);
+    widelog.min('best_rate', rate);
+    widelog.append('providers_checked', provider.name);
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// providers_checked: ["ProviderA", "ProviderB", "ProviderC"]
+// best_rate: 0.85
+```
+
+### Tracking minimum latency
+
+```typescript
+widelog.context(async () => {
+  widelog.set('operation', 'health_check');
+  
+  for (const endpoint of endpoints) {
+    const startTime = performance.now();
+    await fetch(endpoint);
+    const latency = performance.now() - startTime;
+    
+    widelog.min('min_latency_ms', latency);
+    widelog.max('max_latency_ms', latency);
+    widelog.count('checks_performed');
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// checks_performed: 5
+// min_latency_ms: 12.3
+// max_latency_ms: 89.7
+```
+
+## Combining aggregations
+
+You can use multiple aggregation operations together to build rich analytics:
+
+```typescript
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'image-processor',
+  defaultEventName: 'batch_processing',
+});
+
+async function processBatch(images: Image[]) {
+  await widelog.context(async () => {
+    widelog.set('batch_id', generateId());
+    widelog.time.start('total');
+    
+    for (const image of images) {
+      widelog.time.start('processing');
+      
+      try {
+        const result = await processImage(image);
+        const duration = performance.now();
+        
+        // Track success
+        widelog.count('successful');
+        
+        // Collect output formats
+        widelog.append('output_formats', result.format);
+        
+        // Track file sizes
+        widelog.min('min_output_size_bytes', result.size);
+        widelog.max('max_output_size_bytes', result.size);
+        widelog.count('total_output_bytes', result.size);
+        
+        // Track processing times
+        widelog.time.stop('processing');
+        
+      } catch (error) {
+        widelog.count('failed');
+        widelog.append('failed_image_ids', image.id);
+        widelog.time.stop('processing');
+      }
+    }
+    
+    widelog.time.stop('total');
+    widelog.flush();
+  });
+}
+
+// Example logged event:
+// {
+//   "event_name": "batch_processing",
+//   "batch_id": "batch-123",
+//   "successful": 48,
+//   "failed": 2,
+//   "output_formats": ["jpeg", "png", "webp", "jpeg", ...],
+//   "min_output_size_bytes": 12340,
+//   "max_output_size_bytes": 987654,
+//   "total_output_bytes": 24567890,
+//   "failed_image_ids": ["img-456", "img-789"],
+//   "processing_duration_ms": 234.5,
+//   "total_duration_ms": 5678.9
+// }
+```
+
+## Real-world example: API rate limiting
+
+Here's how to use aggregations to monitor rate limiting behavior:
+
+```typescript
+import { widelogger } from 'widelogger';
+import express from 'express';
+
+const { widelog } = widelogger({
+  service: 'api-gateway',
+  defaultEventName: 'rate_limit_check',
+});
+
+app.use(async (req, res, next) => {
+  await widelog.context(async () => {
+    const userId = req.user?.id || 'anonymous';
+    widelog.set('user_id', userId);
+    widelog.set('endpoint', req.path);
+    
+    // Check rate limits for different resources
+    const checks = [
+      { resource: 'api_calls', limit: 100, window: 60 },
+      { resource: 'db_queries', limit: 50, window: 60 },
+      { resource: 'external_calls', limit: 20, window: 60 },
+    ];
+    
+    for (const check of checks) {
+      const current = await rateLimiter.get(userId, check.resource);
+      const remaining = check.limit - current;
+      
+      widelog.set(`${check.resource}.current`, current);
+      widelog.set(`${check.resource}.limit`, check.limit);
+      
+      if (remaining <= 0) {
+        widelog.append('exceeded_limits', check.resource);
+        widelog.count('total_exceeded');
+      }
+      
+      widelog.min('min_remaining', remaining);
+    }
+    
+    widelog.flush();
+    
+    if (widelog.get('total_exceeded') > 0) {
+      res.status(429).json({ error: 'Rate limit exceeded' });
+    } else {
+      next();
+    }
+  });
+});
+```
+
+<Tip>
+Combine aggregation operations with dotted notation to create well-organized, queryable log events that support advanced analytics.
+</Tip>

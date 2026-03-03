@@ -1,0 +1,214 @@
+---
+title: errorFields()
+description: Extract and log structured error information from Error objects or other error values
+---
+
+The `errorFields()` method extracts structured error information from an error and adds it to the current logging context. It automatically extracts error name, message, and optionally the stack trace.
+
+## Signature
+
+```typescript
+widelog.errorFields(error: unknown, options?: ErrorFieldsOptions): void
+```
+
+## Parameters
+
+<ParamField path="error" type="unknown" required>
+  The error to extract fields from. Can be an Error object, a string, or any other value.
+</ParamField>
+
+<ParamField path="options" type="ErrorFieldsOptions">
+  Optional configuration object for customizing error field extraction.
+</ParamField>
+
+<ParamField path="options.prefix" type="string" default="error">
+  The prefix for error field names. Fields will be named `{prefix}.error_name`, `{prefix}.error_message`, and `{prefix}.error_stack`.
+</ParamField>
+
+<ParamField path="options.includeStack" type="boolean" default="true">
+  Whether to include the error stack trace in the output.
+</ParamField>
+
+## Type definitions
+
+```typescript
+interface ErrorFieldsOptions {
+  prefix?: string;
+  includeStack?: boolean;
+}
+```
+
+## Error field extraction
+
+### Error objects
+When the error is an `Error` instance:
+- `error_name`: The error's `name` property (e.g., "TypeError", "ReferenceError")
+- `error_message`: The error's `message` property
+- `error_stack`: The error's `stack` property (if `includeStack` is true)
+
+### String errors
+When the error is a string:
+- `error_name`: "Error"
+- `error_message`: The string value
+- `error_stack`: Not included
+
+### Unknown errors
+When the error is any other type:
+- `error_name`: "UnknownError"
+- `error_message`: "Unknown error"
+- `error_stack`: Not included
+
+## Examples
+
+### Basic error logging
+
+```javascript
+widelog.context(async () => {
+  try {
+    await riskyOperation();
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.set('outcome', 'error');
+    widelog.flush();
+  }
+});
+```
+
+### Without stack trace
+
+```javascript
+widelog.context(() => {
+  try {
+    processData();
+  } catch (error) {
+    widelog.errorFields(error, { includeStack: false });
+    widelog.flush();
+  }
+});
+```
+
+### Custom prefix
+
+```javascript
+widelog.context(async () => {
+  try {
+    await connectToDatabase();
+  } catch (error) {
+    widelog.errorFields(error, { prefix: 'database_error' });
+    widelog.flush();
+  }
+});
+```
+
+### Multiple errors with different prefixes
+
+```javascript
+widelog.context(async () => {
+  try {
+    await authenticateUser();
+  } catch (authError) {
+    widelog.errorFields(authError, { prefix: 'auth' });
+  }
+  
+  try {
+    await fetchData();
+  } catch (fetchError) {
+    widelog.errorFields(fetchError, { prefix: 'fetch' });
+  }
+  
+  widelog.flush();
+});
+```
+
+### Express error handler
+
+```javascript
+app.use((err, req, res, next) => {
+  widelog.context(() => {
+    widelog.set('http.method', req.method);
+    widelog.set('http.path', req.path);
+    widelog.set('http.status_code', 500);
+    widelog.errorFields(err);
+    widelog.flush();
+  });
+  
+  res.status(500).json({ error: 'Internal server error' });
+});
+```
+
+### String error
+
+```javascript
+widelog.context(() => {
+  try {
+    if (!isValid) {
+      throw 'Validation failed';
+    }
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.flush();
+  }
+});
+```
+
+## Output examples
+
+### With Error object (default options)
+
+```json
+{
+  "event_name": "api_request",
+  "outcome": "error",
+  "error": {
+    "error_name": "TypeError",
+    "error_message": "Cannot read property 'id' of undefined",
+    "error_stack": "TypeError: Cannot read property 'id' of undefined\n    at processUser (/app/index.js:42:15)\n    ..."
+  }
+}
+```
+
+### With custom prefix
+
+```json
+{
+  "event_name": "database_operation",
+  "database_error": {
+    "error_name": "ConnectionError",
+    "error_message": "Connection timeout after 5000ms",
+    "error_stack": "ConnectionError: Connection timeout after 5000ms\n    ..."
+  }
+}
+```
+
+### Without stack trace
+
+```json
+{
+  "event_name": "validation",
+  "error": {
+    "error_name": "ValidationError",
+    "error_message": "Email format is invalid"
+  }
+}
+```
+
+### String error
+
+```json
+{
+  "event_name": "api_request",
+  "error": {
+    "error_name": "Error",
+    "error_message": "Validation failed"
+  }
+}
+```
+
+## Notes
+
+- Must be called within a `widelog.context()` block
+- Operations outside a context are silently ignored
+- Stack traces can be large; consider using `includeStack: false` in production for cleaner logs
+- Use different prefixes to log multiple errors in the same context
+- Works with any JavaScript error type that extends Error
+- Gracefully handles non-Error values thrown as exceptions

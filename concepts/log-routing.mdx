@@ -1,0 +1,229 @@
+---
+title: Log routing
+description: How WideLogger automatically routes events to the appropriate log level
+---
+
+WideLogger automatically determines whether to log events at the `info` or `error` level based on status codes and outcome fields. This eliminates the need to manually choose log levels throughout your code.
+
+## Routing logic
+
+When you call `widelog.flush()`, WideLogger examines the event data and applies this routing logic:
+
+```typescript
+// From index.ts:86-103
+const transport = (event: Record<string, unknown>) => {
+  if (Object.keys(event).length === 0) {
+    return;
+  }
+
+  const statusCode =
+    typeof event.status_code === "number" ? event.status_code : undefined;
+  const isError =
+    statusCode !== undefined ? statusCode >= 500 : event.outcome === "error";
+  const payload = { event_name: options.defaultEventName, ...event };
+
+  if (isError) {
+    logger.error(payload);
+    return;
+  }
+
+  logger.info(payload);
+};
+```
+
+**The rules:**
+
+1. If `status_code` is a number >= 500 → log at `error` level
+2. If `status_code` is present but < 500 → log at `info` level
+3. If no `status_code` and `outcome` is `"error"` → log at `error` level
+4. Otherwise → log at `info` level
+5. If the event is empty (no fields set) → don't log anything
+
+<Note>
+The `status_code` field takes precedence over `outcome`. If both are present, only `status_code` determines the routing.
+</Note>
+
+## HTTP status code routing
+
+For HTTP applications, this provides automatic error detection:
+
+```typescript
+// Success - logs at info level
+widelog.context(() => {
+  widelog.set('method', 'GET');
+  widelog.set('path', '/api/users');
+  widelog.set('status_code', 200);
+  widelog.flush(); // → logger.info()
+});
+
+// Client error - logs at info level
+widelog.context(() => {
+  widelog.set('method', 'POST');
+  widelog.set('path', '/api/users');
+  widelog.set('status_code', 400);
+  widelog.flush(); // → logger.info()
+});
+
+// Server error - logs at error level
+widelog.context(() => {
+  widelog.set('method', 'GET');
+  widelog.set('path', '/api/users');
+  widelog.set('status_code', 500);
+  widelog.flush(); // → logger.error()
+});
+```
+
+<Tip>
+4xx client errors log at info level because they represent expected error conditions (invalid input, authentication failures, etc.) rather than system failures.
+</Tip>
+
+## Outcome-based routing
+
+For non-HTTP operations, use the `outcome` field:
+
+```typescript
+// Background job success - logs at info level
+widelog.context(async () => {
+  widelog.set('job', 'email-sender');
+  try {
+    await sendEmails();
+    widelog.set('outcome', 'success');
+  } catch (err) {
+    widelog.errorFields(err);
+    widelog.set('outcome', 'error');
+  }
+  widelog.flush(); // Routes based on outcome
+});
+
+// Database operation - logs at error level
+widelog.context(async () => {
+  widelog.set('operation', 'migration');
+  try {
+    await runMigration();
+    widelog.set('outcome', 'success');
+  } catch (err) {
+    widelog.errorFields(err);
+    widelog.set('outcome', 'error'); // → logger.error()
+  }
+  widelog.flush();
+});
+```
+
+## Precedence example
+
+When both `status_code` and `outcome` are present, `status_code` wins:
+
+```typescript
+// From index.test.ts:311-320
+widelog.context(() => {
+  widelog.set('status_code', 200);
+  widelog.set('outcome', 'error');
+  widelog.flush();
+});
+// Logs at info level because status_code is 200
+```
+
+This ensures HTTP status codes always control routing for HTTP operations, even if you also track an outcome field.
+
+## Empty event handling
+
+If you flush without setting any fields, nothing is logged:
+
+```typescript
+widelog.context(() => {
+  // No operations
+  widelog.flush(); // Silent - no log output
+});
+```
+
+This prevents noise from empty events.
+
+## Real-world example: Express error handling
+
+```typescript
+import express from 'express';
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'api',
+  defaultEventName: 'http.request'
+});
+
+const app = express();
+
+app.use((req, res, next) => {
+  widelog.context(async () => {
+    widelog.set('method', req.method);
+    widelog.set('path', req.path);
+    widelog.time.start('duration');
+    
+    res.on('finish', () => {
+      widelog.time.stop('duration');
+      widelog.set('status_code', res.statusCode);
+      
+      // Automatically routes:
+      // - 200-499 → info
+      // - 500+ → error
+      widelog.flush();
+    });
+    
+    next();
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  widelog.errorFields(err);
+  res.status(500).json({ error: 'Internal server error' });
+  // The middleware above will flush with status_code: 500 → error level
+});
+```
+
+## Underlying Pino logger
+
+WideLogger routes to Pino's standard log methods:
+
+```typescript
+// From index.ts:69-82
+const logger = pino(
+  {
+    level: options.level ?? process.env.LOG_LEVEL ?? "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+    base: {
+      service: options.service,
+      service_version: options.version,
+      commit_hash: options.commitHash ?? "unknown",
+      instance_id: options.instanceId ?? String(process.pid),
+      environment,
+    },
+  },
+  pinoTransport
+);
+```
+
+You can configure the minimum log level via the `level` option or `LOG_LEVEL` environment variable. Events routed to `logger.error()` or `logger.info()` will only appear if they meet the configured level threshold.
+
+<Info>
+Setting `level: 'error'` will suppress all info-level events, logging only errors (status_code >= 500 or outcome === 'error').
+</Info>
+
+## Benefits of automatic routing
+
+1. **Less code** - No need to write `if (statusCode >= 500)` checks
+2. **Consistency** - All events follow the same routing rules
+3. **Correctness** - Hard to accidentally log errors at info level
+4. **Flexibility** - Works for both HTTP and non-HTTP operations
+5. **Alerting-ready** - Error-level logs can trigger alerts while info logs provide metrics
+
+```typescript
+// Before: Manual log level selection
+if (statusCode >= 500) {
+  logger.error({ ...event });
+} else {
+  logger.info({ ...event });
+}
+
+// After: Automatic routing
+widelog.set('status_code', statusCode);
+widelog.flush();
+```

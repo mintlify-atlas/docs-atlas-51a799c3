@@ -1,0 +1,214 @@
+---
+title: Error handling
+description: Extract structured error information using errorFields()
+---
+
+The `errorFields()` method automatically extracts structured information from errors and adds them to your wide event. This is particularly useful for capturing error details in a consistent format across your application.
+
+## Basic usage
+
+When an error occurs, use `errorFields()` to automatically extract the error name, message, and stack trace:
+
+```typescript
+import { widelogger } from 'widelogger';
+
+const { widelog } = widelogger({
+  service: 'api',
+  defaultEventName: 'request',
+});
+
+widelog.context(async () => {
+  widelog.set('user_id', '12345');
+  widelog.set('endpoint', '/api/users');
+  
+  try {
+    await processUserData();
+    widelog.set('outcome', 'success');
+  } catch (error) {
+    widelog.errorFields(error);
+    widelog.set('outcome', 'error');
+  }
+  
+  widelog.flush();
+});
+```
+
+This automatically adds the following fields to your event:
+- `error.error_name` - The name of the error (e.g., "TypeError", "ValidationError")
+- `error.error_message` - The error message
+- `error.error_stack` - The full stack trace
+
+## Custom prefix
+
+You can use a custom prefix to namespace error fields differently:
+
+```typescript
+widelog.context(async () => {
+  try {
+    await validateInput(data);
+  } catch (error) {
+    widelog.errorFields(error, { prefix: 'validation' });
+  }
+  
+  try {
+    await saveToDatabase(data);
+  } catch (error) {
+    widelog.errorFields(error, { prefix: 'database' });
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes:
+// validation.error_name, validation.error_message, validation.error_stack
+// database.error_name, database.error_message, database.error_stack
+```
+
+<Tip>
+Using different prefixes allows you to capture multiple errors in a single event, which is useful when you want to track where in a multi-step process an error occurred.
+</Tip>
+
+## Excluding stack traces
+
+Stack traces can be verbose and may not always be necessary. You can exclude them:
+
+```typescript
+widelog.context(async () => {
+  try {
+    await authenticate(token);
+  } catch (error) {
+    widelog.errorFields(error, { includeStack: false });
+    widelog.set('outcome', 'error');
+  }
+  
+  widelog.flush();
+});
+
+// Logged event includes only:
+// error.error_name and error.error_message
+```
+
+<Note>
+Excluding stack traces can reduce log volume and costs, especially for expected errors like authentication failures or validation errors.
+</Note>
+
+## Error type handling
+
+The `errorFields()` method handles different error types automatically:
+
+### Error instances
+
+```typescript
+const error = new Error('Database connection failed');
+widelog.errorFields(error);
+
+// Extracts:
+// error.error_name: "Error"
+// error.error_message: "Database connection failed"
+// error.error_stack: <full stack trace>
+```
+
+### Custom error classes
+
+```typescript
+class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+const error = new ValidationError('Invalid email format');
+widelog.errorFields(error);
+
+// Extracts:
+// error.error_name: "ValidationError"
+// error.error_message: "Invalid email format"
+// error.error_stack: <full stack trace>
+```
+
+### String errors
+
+```typescript
+widelog.errorFields('Something went wrong');
+
+// Extracts:
+// error.error_name: "Error"
+// error.error_message: "Something went wrong"
+// No stack trace
+```
+
+### Unknown errors
+
+```typescript
+widelog.errorFields(null);
+
+// Extracts:
+// error.error_name: "UnknownError"
+// error.error_message: "Unknown error"
+// No stack trace
+```
+
+<Warning>
+Always use proper Error instances when throwing errors to ensure complete error information is captured, including stack traces.
+</Warning>
+
+## Real-world example
+
+Here's a complete example showing error handling in an API endpoint:
+
+```typescript
+import { widelogger } from 'widelogger';
+import express from 'express';
+
+const { widelog } = widelogger({
+  service: 'user-api',
+  defaultEventName: 'api_request',
+});
+
+app.post('/api/users', async (req, res) => {
+  await widelog.context(async () => {
+    widelog.set('method', req.method);
+    widelog.set('path', req.path);
+    widelog.set('user_id', req.user?.id);
+    
+    try {
+      // Validate input
+      const validated = await validateUserInput(req.body);
+      
+      // Create user
+      const user = await createUser(validated);
+      
+      // Send notification
+      await sendWelcomeEmail(user.email);
+      
+      widelog.set('outcome', 'success');
+      widelog.set('created_user_id', user.id);
+      widelog.set('status_code', 201);
+      
+      res.status(201).json(user);
+      
+    } catch (error) {
+      // Capture error details
+      widelog.errorFields(error);
+      widelog.set('outcome', 'error');
+      
+      // Determine response based on error type
+      if (error instanceof ValidationError) {
+        widelog.set('status_code', 400);
+        res.status(400).json({ error: error.message });
+      } else if (error instanceof DuplicateUserError) {
+        widelog.set('status_code', 409);
+        res.status(409).json({ error: 'User already exists' });
+      } else {
+        widelog.set('status_code', 500);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    } finally {
+      widelog.flush();
+    }
+  });
+});
+```
+
+This approach ensures that every request is logged with complete error information when failures occur, making debugging and monitoring much easier.

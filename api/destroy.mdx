@@ -1,0 +1,84 @@
+---
+title: destroy()
+description: Cleanup function for graceful logger shutdown
+---
+
+The `destroy()` function gracefully shuts down the WideLogger instance by flushing any pending logs and closing transport resources.
+
+## Signature
+
+```typescript
+function destroy(): Promise<void>
+```
+
+## Returns
+
+A Promise that resolves when all logs have been flushed and the logger has been shut down.
+
+## Behavior
+
+- Flushes all pending log entries to ensure they are written
+- Closes the pino-pretty transport in non-production environments
+- Should be called before your application exits to prevent log loss
+
+## Example
+
+```typescript
+import { widelogger } from "widelogger";
+
+const { widelog, destroy } = widelogger({
+  service: "my-api",
+  defaultEventName: "api.request",
+});
+
+// Use widelog throughout your application...
+
+// On shutdown (e.g., SIGTERM handler)
+process.on("SIGTERM", async () => {
+  console.log("Shutting down gracefully...");
+  
+  // Cleanup logger
+  await destroy();
+  
+  // Exit
+  process.exit(0);
+});
+```
+
+## Best practices
+
+- Always call `destroy()` during application shutdown
+- Wait for the Promise to resolve before exiting the process
+- Call `destroy()` in your shutdown handlers (SIGTERM, SIGINT)
+- Consider using a graceful shutdown library that handles cleanup coordination
+
+## Example with Express
+
+```typescript
+import express from "express";
+import { widelogger } from "widelogger";
+
+const { widelog, destroy } = widelogger({
+  service: "my-api",
+  defaultEventName: "api.request",
+});
+
+const app = express();
+const server = app.listen(3000);
+
+// Graceful shutdown
+const shutdown = async () => {
+  console.log("Shutting down...");
+  
+  // Stop accepting new connections
+  server.close();
+  
+  // Flush logs
+  await destroy();
+  
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+```

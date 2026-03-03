@@ -1,80 +1,269 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build your first wide event logger in under 5 minutes
 ---
 
-## Get started in three steps
+This guide walks you through creating a complete Express API with WideLogger integration. You'll learn the core concepts by building a working example.
 
-Get your documentation site running locally and make your first customization.
+## Setup your project
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Create a new project">
+    Initialize a new Node.js project:
+    ```bash
+    mkdir my-api && cd my-api
+    npm init -y
+    ```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    Set the module type in `package.json`:
+    ```json package.json
+    {
+      "type": "module"
+    }
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Install dependencies">
+    Install WideLogger and Express:
+    ```bash
+    npm install widelogger express
+    npm install -D @types/express typescript
+    ```
+  </Step>
+</Steps>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Create the logger
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+Create a shared logger instance that you'll import throughout your application:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```ts src/logger.ts
+import { widelogger } from "widelogger";
 
-### Step 3: Go live
+export const { widelog, destroy } = widelogger({
+  service: "example-api",
+  defaultEventName: "http_request",
+  version: "1.0.0",
+  commitHash: process.env.COMMIT_SHA,
+});
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<Tip>
+  The `widelogger()` function returns both `widelog` (for logging operations) and `destroy()` (for graceful shutdown).
+</Tip>
+
+## Build logging middleware
+
+Create middleware that wraps each request in an isolated context:
+
+```ts src/middleware/logging.ts
+import type { Request, Response, NextFunction } from "express";
+import { widelog } from "../logger";
+
+export const logging = (
+  request: Request,
+  response: Response,
+  next: NextFunction
+) => {
+  widelog.context(
+    () =>
+      new Promise<void>((resolve) => {
+        // Capture request details
+        widelog.set("method", request.method);
+        widelog.set("path", request.path);
+        widelog.time.start("duration_ms");
+
+        // Wait for response to finish
+        response.on("finish", () => {
+          widelog.set("status_code", response.statusCode);
+          widelog.time.stop("duration_ms");
+          widelog.flush(); // Emit the event
+          resolve();
+        });
+
+        next();
+      })
+  );
+};
+```
+
+<Note>
+  `widelog.context()` creates an isolated async context using AsyncLocalStorage. All operations inside this context are automatically tracked, even across async boundaries.
+</Note>
+
+## Create a route handler
+
+Build a route that accumulates additional context:
+
+```ts src/routes/checkout.ts
+import type { Request, Response } from "express";
+import { widelog } from "../logger";
+
+export const checkout = (request: Request, response: Response) => {
+  const { userId } = request.body;
+
+  // Add user context
+  widelog.set("user.id", userId);
+  widelog.set("user.plan", "premium");
+
+  // Track database timing
+  widelog.time.start("db_ms");
+  const order = { id: "ord_001", totalCents: 14_999, itemCount: 3 };
+  widelog.time.stop("db_ms");
+
+  // Add order details
+  widelog.set("order.id", order.id);
+  widelog.set("order.total_cents", order.totalCents);
+  widelog.count("order.items", order.itemCount);
+
+  response.json({ orderId: order.id });
+};
+```
+
+<Tip>
+  Notice how the route handler doesn't need to know about context creation or flushing — it just adds fields. The middleware handles the rest.
+</Tip>
+
+## Wire it together
+
+Create the Express server with graceful shutdown:
+
+```ts src/server.ts
+import express from "express";
+import { destroy } from "./logger";
+import { logging } from "./middleware/logging";
+import { checkout } from "./routes/checkout";
+
+const app = express();
+
+app.use(express.json());
+app.use(logging);
+
+app.post("/checkout", checkout);
+
+const server = app.listen(3000, () => {
+  console.log("Listening on http://localhost:3000");
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  server.close();
+  await destroy();
+  process.exit(0);
+});
+```
+
+## Test it out
+
+Start your server:
+
+```bash
+node src/server.ts
+```
+
+Make a request:
+
+```bash
+curl -X POST http://localhost:3000/checkout \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "usr_123"}'
+```
+
+You'll see a single comprehensive log event:
+
+```json
+{
+  "level": 30,
+  "time": "2026-03-03T10:30:45.123Z",
+  "service": "example-api",
+  "service_version": "1.0.0",
+  "commit_hash": "unknown",
+  "instance_id": "12345",
+  "environment": "development",
+  "event_name": "http_request",
+  "method": "POST",
+  "path": "/checkout",
+  "user": {
+    "id": "usr_123",
+    "plan": "premium"
+  },
+  "order": {
+    "id": "ord_001",
+    "total_cents": 14999,
+    "items": 3
+  },
+  "db_ms": 2,
+  "duration_ms": 5,
+  "status_code": 200
+}
+```
+
+## Key concepts
+
+<CardGroup cols={2}>
+  <Card title="Context isolation" icon="shield">
+    `widelog.context()` creates an isolated async context for each request using AsyncLocalStorage
+  </Card>
+  <Card title="Dot notation" icon="circle-nodes">
+    Keys like `"user.id"` automatically expand to nested objects: `{ user: { id: "..." } }`
+  </Card>
+  <Card title="Accumulation" icon="layer-group">
+    Multiple operations on the same key are merged intelligently (last write wins for `set`, sum for `count`, etc.)
+  </Card>
+  <Card title="Automatic routing" icon="route">
+    Events with `status_code >= 500` or `outcome === "error"` log at error level
+  </Card>
+</CardGroup>
+
+## Available operations
+
+WideLogger provides multiple ways to accumulate context:
+
+| Method | Description | Example |
+|--------|-------------|----------|
+| `set(key, value)` | Set a field (last write wins) | `widelog.set("user.id", "123")` |
+| `count(key, amount?)` | Increment a counter | `widelog.count("items", 3)` |
+| `append(key, value)` | Append to an array | `widelog.append("tags", "premium")` |
+| `max(key, value)` | Track maximum value | `widelog.max("peak_memory", 512)` |
+| `min(key, value)` | Track minimum value | `widelog.min("min_latency", 10)` |
+| `time.start(key)` | Start a timer | `widelog.time.start("db_ms")` |
+| `time.stop(key)` | Stop timer and record ms | `widelog.time.stop("db_ms")` |
+| `errorFields(error)` | Extract error details | `widelog.errorFields(err)` |
+
+## Error handling
+
+Handle errors gracefully and capture error context:
+
+```ts
+app.post("/checkout", async (request, response) => {
+  try {
+    const order = await processOrder(request.body.userId);
+    widelog.set("outcome", "success");
+    response.json({ orderId: order.id });
+  } catch (error) {
+    widelog.set("outcome", "error");
+    widelog.errorFields(error); // Adds error_name, error_message, error_stack
+    response.status(500).json({ error: "Checkout failed" });
+  }
+});
+```
+
+<Note>
+  `errorFields()` automatically extracts `error_name`, `error_message`, and `error_stack` from Error objects.
+</Note>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="API Reference" icon="code" href="/api/widelogger">
+    Explore all available methods and options
+  </Card>
+  <Card title="Integration Guides" icon="book" href="/guides/fastify">
+    See examples for Fastify, Hono, and Bun
+  </Card>
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts/context-isolation">
+    Learn about context isolation and dot notation
+  </Card>
+  <Card title="Advanced Features" icon="star" href="/advanced/timing">
+    Patterns for timing and aggregations
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
