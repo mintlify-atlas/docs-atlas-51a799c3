@@ -327,12 +327,7 @@ app.use(async (req, res, next) => {
     }
     
     widelog.flush();
-    
-    if (widelog.get('total_exceeded') > 0) {
-      res.status(429).json({ error: 'Rate limit exceeded' });
-    } else {
-      next();
-    }
+    next();
   });
 });
 ```
